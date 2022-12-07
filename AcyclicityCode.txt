@@ -1,0 +1,269 @@
+
+RTI:= function(x)
+	for a in [0..100000] do
+		if a eq x then
+			return a;
+			break a;
+		end if;
+	end for;
+end function;
+
+DetOfGroup := function(G,m)
+	D := MatrixGroup<1, IntegerRing(m) | [1] >;
+	for X in Generators(G) do
+		D := MatrixGroup<1, IntegerRing(m) | Generators(D), [Determinant(X)] >;
+	end for;
+	return D;
+end function;
+
+IsZSAdmissible := function(G,m)
+	M1 := Matrix(Integers(m),2,2,[1,0,0,-1]);
+	M2 := Matrix(Integers(m),2,2,[1,1,0,-1]);
+	answer := false;
+	for g in G do
+		if Trace(g) eq 0 then
+			for h in GL(2,Integers(m)) do
+				if g*h eq h*M1 then
+					answer := true;
+					break h;
+					break g;
+				end if;
+				if g*h eq h*M2 then
+					answer := true;
+					break h;
+					break g;
+				end if;
+			end for;
+		end if;
+	end for;
+	return answer;
+end function;
+
+Genus := function(H,m)
+	G := GL(2,IntegerRing(m));
+	S := SL(2,IntegerRing(m));
+	f, GPerm := PermutationRepresentation(G);
+	gip := Matrix(Integers(m),2,2,[0,-1,1,0]);
+	gip := G!gip;
+	gpp := Matrix(Integers(m),2,2,[1,1,-1,0]);
+	gpp := G!gpp;
+	gi := f(gip);
+	gp := f(gpp);
+	Si := Set(Class(f(S),gi)); 
+	Sp := Set(Class(f(S),gp));
+	Gamma := MatrixGroup<2, IntegerRing(m) | [1,1,0,1] >;
+	negI := Matrix(IntegerRing(m),2,2,[-1,0,0,-1]);
+	Xenl := MatrixGroup<2, IntegerRing(m) | H, [-1,0,0,-1] >;
+	XS := Xenl meet S;
+	Ni := Si meet Set(f(XS));
+	Np := Sp meet Set(f(XS));
+	ri := #Ni / #Si;
+	rp := #Np / #Sp;
+	rinf := #DoubleCosetRepresentatives(f(S),f(Gamma),f(XS))*#XS/#S;
+	genus := 1 + #S/12/#XS*(1 - 3*ri - 4*rp - 6*rinf);
+	return <ri, rp, rinf, genus>;
+end function;
+
+CumminsPauliGL2Groups := function(m,g)
+	List := [];
+	for d in Divisors(#GL(2,IntegerRing(m))) do
+		print <d,#GL(2,IntegerRing(m))/d>;
+		for H in Subgroups(GL(2,Integers(m)) : IndexEqual := d) do
+			if Genus(H`subgroup,m)[4] eq g then
+				Append(~List,<H`subgroup,Genus(H`subgroup,m),m>);
+			end if;
+		end for;
+	end for;
+	return List;
+end function;
+
+/* “CumminsPauliGL2Groups(m,g)” will produce a list of all of the subgroups G of GL(2,Zhat) of level dividing m for which the modular curve X_{Gtilde} has genus g.  As it runs, it prints “<d,#GL(2,IntegerRing(m))/d>” as d ranges through the divisors of #GL(2,IntegerRing(m)); this is done so that the user can monitor the computation’s progress. */
+
+ModMKernel := function(m,ell)
+	Kernel1Generators := [];
+	for X in Generators(GL(2,IntegerRing(ell))) do
+		XK1 := Matrix(IntegerRing(m*ell),2,2,[CRT([1,RTI(X[1,1])],[m,ell]),CRT([0,RTI(X[1,2])],[m,ell]),CRT([0,RTI(X[2,1])],[m,ell]),CRT([1,RTI(X[2,2])],[m,ell])]);
+		Append(~Kernel1Generators,XK1);
+	end for;
+	Ker1 := MatrixGroup<2, IntegerRing(m*ell) | SequenceToSet(Kernel1Generators) >;
+	return Ker1;
+end function;
+
+IsRightKernelWeak := function(H,n)
+	rightkernel := true;
+	for x := 1 to #Factorization(n) do
+		p := Factorization(n)[x,1];
+		a := Factorization(n)[x,2];
+		np := Floor(n/p^a);
+		Hpa := MatrixGroup<2, Integers(p^a) | Generators(H) >;
+		Hnp := MatrixGroup<2, Integers(np) | Generators(H) >;
+		if #Hpa eq 1 or not #(H meet ModMKernel(np,p^a)) eq 1 then
+			rightkernel := false;
+			break x;
+		end if;
+	end for;	
+	return rightkernel;
+end function;
+
+FindingPreAcyclicGroups := function(L,n)
+	List := [];
+	for x := 1 to #L do
+		print x;
+		G := L[x,1];
+		ispreacyclic := false;
+		if #DetOfGroup(G,n) eq EulerPhi(n) then
+			ListOfNs := [];
+			for Y in NormalSubgroups(G) do
+				N := Y`subgroup;
+				if IsAbelian(G/N) and IsRightKernelWeak(N,n) eq true then
+					ispreacyclic := true;
+					Append(~ListOfNs,N);
+				end if;
+			end for;
+			if ispreacyclic eq true then
+				Append(~List,<G,ListOfNs,L[x,2],n>);
+			end if;
+		end if;
+	end for;
+	return List;
+end function;
+
+/* “FindingPreAcyclicGroups(L,m)” thins a given list L of groups G whose levels divide m down to the sublist of those groups G for which the modular curve X_{\tilde{G}} is defined over Q (in other words, satisfying \det(G) = Zhat^*) and that have a normal subgroup N for which G/N is abelian and which satisfies properties (2) and (3) of Proposition 3.7 of “On the acyclicity of reductions of elliptic curves modulo primes in arithmetic progressions” by Nathan Jones and Sung Min Lee. */
+
+ThinDownToZSAdmissible := function(L,m)
+	List := [];
+	for x := 1 to #L do
+		if IsZSAdmissible(L[x,1],m) then
+			Append(~List,L[x]);
+		end if;
+	end for;
+	return List;
+end function;
+
+/* “ThinDownToZSAdmissible(L,m)” thins a given list L of groups G whose levels divide m down to the sublist of those groups G that satisfy the third bullet point of the definition of an “admissible group” given in Section 3 of the paper “Modular curves of prime-power level with infinitely many rational points” by Andrew V. Sutherland and David Zywina (any group G that is the image of Galois associated to an elliptic curve over Q must satisfy this property). */
+
+IsConjugateToSubgroup := function(G1,G2,m)
+	answer := false;
+	matrix := 0;
+	for H2 in Subgroups(G2 : OrderEqual := #G1) do
+		if IsConjugate(GL(2,Integers(m)),G1,H2`subgroup) then
+			answer, matrix := IsConjugate(GL(2,Integers(m)),G1,H2`subgroup);
+			break H2;
+		end if;
+	end for;
+	return answer, matrix;
+end function;
+
+ThinDownByMaximality := function(L,m);
+	List := [];
+	for x := 1 to #L do
+		ismaximal := true;
+		for y := 1 to #L do
+			if y ne x then
+				if IsConjugateToSubgroup(L[x,1],L[y,1],m) then
+					ismaximal := false;
+					break y;
+				end if;
+			end if;
+		end for;
+		if ismaximal eq true then
+			Append(~List,L[x]);
+		end if;
+	end for;
+	return List;
+end function;
+
+CumminsPauliLevels := [6, 10, 14, 15, 21, 22, 26, 30, 33, 39, 42];
+
+ListOfPreAcyclicGroups := function(List)
+	PreList := [];
+	for m in List do
+		print m;
+		Lmg0 := CumminsPauliGL2Groups(m,0);
+		Lmg1 := CumminsPauliGL2Groups(m,1);
+		Lm := Lmg0 cat Lmg1;
+		FLm := FindingPreAcyclicGroups(Lm,m);
+		ZSFLm := ThinDownToZSAdmissible(FLm,m);
+		TZSFLm := ThinDownByMaximality(ZSFLm,m);
+		PreList := PreList cat TZSFLm;
+	end for;
+	return PreList;
+end function;
+
+HasPrettyGoodCoset := function(G,H,n)
+	answer := false;
+	for g in G do
+		ganswer := true;
+		for h in H do
+			stillokay := false;
+			for x := 1 to #Factorization(n) do
+				p := Factorization(n)[x,1];
+				a := Factorization(n)[x,2];
+				Order := #MatrixGroup<2, Integers(p^a) | h*g >;
+				if Order eq 1 then
+					stillokay := true;
+					break x;
+				end if;
+			end for;
+			if stillokay eq false then
+				ganswer := false;
+				break h;
+			end if;
+		end for; 
+		if ganswer eq true then
+			answer := true;
+			break g;
+		end if;
+	end for;
+	return answer;
+end function;
+
+IsRightKernelStrong := function(H,n)
+	rightkernel := false;
+	HSoFar := MatrixGroup< 2, Integers(n) | >;
+	for x := 1 to #Factorization(n) do
+		p := Factorization(n)[x,1];
+		a := Factorization(n)[x,2];
+		np := Floor(n/p^a);
+		Hpa := MatrixGroup<2, Integers(p^a) | Generators(H) >;
+		GlobalGenerators := [];
+		for M in Generators(Hpa) do
+			Mgen := Matrix(Integers(n),2,2,[ CRT([RTI(M[1,1]),1],[p^a,np]), CRT([RTI(M[1,2]),0],[p^a,np]), CRT([RTI(M[2,1]),0],[p^a,np]), CRT([RTI(M[2,2]),1],[p^a,np]) ]);
+			Append(~GlobalGenerators,Mgen);	
+		end for;
+		HSoFar := MatrixGroup< 2, Integers(n) | Generators(HSoFar), SequenceToSet(GlobalGenerators) >;
+	end for;
+	if HasPrettyGoodCoset(HSoFar,H,n) then
+		rightkernel := true;
+	end if;
+	return rightkernel;
+end function;
+
+FindingAcyclicGroups := function(L,n)
+	List := [];
+	for x := 1 to #L do
+		LocalListOfKernels := [];
+		hasatleastonegoodkernel := false;
+		for H in L[x,2] do
+			if IsRightKernelStrong(H,n) then
+				Append(~LocalListOfKernels,H);
+			end if;
+		end for;
+		if #LocalListOfKernels gt 0 then
+			Append(~List,<L[x,1],LocalListOfKernels,L[x,3],L[x,4]>);
+		end if;
+	end for;	
+	return List;	
+end function;
+
+/* LPre below computes all open subgroups G of GL(2,Zhat) of genus at most one and with level in {6, 10, 14, 15, 21, 22, 26, 30, 33, 39, 42} that satisfy \det(G) = Zhat^* along with the third bullet point in the definition of “admissible group” given in Section 3 of the paper “Modular curves of prime-power level with infinitely many rational points” by Andrew V. Sutherland and David Zywina (any group G that is the image of Galois associated to an elliptic curve over Q must satisfy this definition of “admissible group”) and that also have a normal subgroup N with G/N abelian and which satisfies properties (2) and (3) of Proposition 3.7 of “On the acyclicity of reductions of elliptic curves modulo primes in arithmetic progressions” by Nathan Jones and Sung Min Lee.  Then, LPre lists all of these open subgroups that are maximal with respect to subset containment (up to conjugation inside GL(2,Zhat)). */
+
+/* L below thins the list LPre down to those subgroups listed in LPre that additionally satisfy the first condition in (1) of Proposition 3.7 of “On the acyclicity of reductions of elliptic curves modulo primes in arithmetic progressions” by Nathan Jones and Sung Min Lee. */
+
+/* Note that L consists of only a single group, namely the group G_6 described in Section 2.2 of “On the acyclicity of reductions of elliptic curves modulo primes in arithmetic progressions” by Nathan Jones and Sung Min Lee. */
+
+LPre := ListOfPreAcyclicGroups(CumminsPauliLevels);
+
+L := FindingAcyclicGroups(LPre,6);
+
+L;
